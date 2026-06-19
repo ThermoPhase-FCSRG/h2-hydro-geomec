@@ -51,9 +51,9 @@ Lx, Ly = 100.0, 5.0
 mesh = RectangleMesh(numel_x, numel_y, Lx, Ly, quadrilateral=True)
 
 SECONDS_PER_DAY = 86400.0
-T_days = 365.0      # total simulation time in days
+t_days = 365.0      # total simulation time in days
 dt_days = 5.0       # time step in days
-T_total = T_days * SECONDS_PER_DAY
+t_total = t_days * SECONDS_PER_DAY
 dt_seconds = dt_days * SECONDS_PER_DAY
 dt = Constant(dt_seconds)
 
@@ -72,7 +72,9 @@ W = VectorFunctionSpace(mesh, "CG", degree)
 # -----------------------------------------------------------------------------
 bar = 1.0e5     # 1 bar in Pa
 
-# Methane viscosity; the fitted Peng-Robinson polynomial below supplies Z(p).
+T = 300.0       # temperature in K
+
+# Methane viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
 gas_viscosity_value = 1.2e-5
 gas_viscosity = Constant(gas_viscosity_value)
 
@@ -115,9 +117,9 @@ top_traction = as_vector((0.0, -p0))
 
 
 # -----------------------------------------------------------------------------
-# Peng-Robinson compressibility factor, fitted polynomial Z(p)
+# Peng-Robinson compressibility factor, fitted polynomial Z(p, T)
 # -----------------------------------------------------------------------------
-def Z(p):
+def Z_methane(p):
     # Same fitted Peng-Robinson polynomial used in compressible_hm_2D_transient_nl.py.
     zcoef = np.zeros(10)
     zcoef[0] = 9.99921144125617722409060661448165774345397949218750e-01
@@ -136,6 +138,13 @@ def Z(p):
         value += zcoef[i] * p**i
     return value
 
+def Z(p, T):  
+    """
+    Fator de compressibilidade do hidrogênio.
+    Temporário: gás ideal.
+    Será substituído pelo modelo real H2.
+    """
+    return 1.0
 
 def epsilon(u):
     return sym(grad(u))
@@ -340,8 +349,8 @@ max_fixed_stress_iterations = 40
 # and sigma_iter, while Newton solves the pressure dependence inside this residual.
 permeability_newton = effective_permeability(phi_iter)
 stress_increment_newton = sigma_iter - sigma_n
-pz = p / Z(p)
-pz_n = p_n / Z(p_n)
+pz = p / Z(p, T)
+pz_n = p_n / Z(p_n, T)
 F_pressure = (
     gas_saturation_constant * phi_iter * (pz - pz_n) * v * dx
     + gas_saturation_constant * beta_r * pz * (p - p_n) * v * dx
@@ -363,8 +372,8 @@ pressure_solver = NonlinearVariationalSolver(
 # -----------------------------------------------------------------------------
 # Outputs
 # -----------------------------------------------------------------------------
-repo_root = Path(__file__).resolve().parents[2]
-output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_injection_newton"
+repo_root = Path(__file__).resolve().parents[1]
+output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_H2_cyclic"
 output_dir.mkdir(parents=True, exist_ok=True)
 for output_file in (
     "fields.pvd",
@@ -399,7 +408,7 @@ history_rows = []
 # -----------------------------------------------------------------------------
 # Time loop
 # -----------------------------------------------------------------------------
-total_steps = int(round(T_total / dt_seconds))
+total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
 while step < total_steps:
@@ -447,7 +456,7 @@ while step < total_steps:
 
     dsigma_total_dt.interpolate((sigma_t - sigma_n) / dt)
     source_rate.interpolate(
-        -gas_saturation_constant * (p / Z(p)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
+        -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
 
     p_n.assign(p)
@@ -518,7 +527,7 @@ np.savetxt(
             "case=2D_fixed_stress_injection_training_newton",
             f"mesh={numel_x}x{numel_y}",
             f"domain_m={Lx}x{Ly}",
-            f"T_days={T_days}",
+            f"t_days={t_days}",
             f"dt_days={dt_days}",
             f"p0_Pa={p0}",
             f"injection_overpressure_Pa={injection_overpressure}",
