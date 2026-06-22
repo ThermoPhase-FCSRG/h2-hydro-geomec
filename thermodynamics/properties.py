@@ -1,3 +1,4 @@
+# properties.py
 import numpy as np
 
 
@@ -12,15 +13,23 @@ Z_coefficients = np.array([
 ])
 
 
-def calculate_Z(P):
+def calculate_Z(P, T=300.0):
     """
     Fator de compressibilidade do hidrogênio.
 
     Parâmetro:
     P : pressão em Pa
+    T : temperatura em K (atualmente não usada)
 
     Retorna:
     Z : fator de compressibilidade
     """
 
     return np.polyval(Z_coefficients, P)
+
+def calculate_viscosity(P,T=300):
+    """
+    Viscosidade do hidrogênio.
+    Ajuste inicial.
+    """
+    return 0.94e-5  #precisa alterar esse valor. essse valor é pra T=50C

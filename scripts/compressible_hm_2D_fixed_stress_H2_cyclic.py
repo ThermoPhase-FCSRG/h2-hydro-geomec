@@ -126,30 +126,11 @@ top_traction = as_vector((0.0, -p0))
 # -----------------------------------------------------------------------------
 # Peng-Robinson compressibility factor, fitted polynomial Z(p, T)
 # -----------------------------------------------------------------------------
-def Z_methane(p):
-    # Same fitted Peng-Robinson polynomial used in compressible_hm_2D_transient_nl.py.
-    zcoef = np.zeros(10)
-    zcoef[0] = 9.99921144125617722409060661448165774345397949218750e-01
-    zcoef[1] = -1.19919829040115086206268166821135856547897446944262e-08
-    zcoef[2] = 2.95290097079410864772724180594317997860333752145959e-16
-    zcoef[3] = 9.42231835327529024372629441226386885009463920848079e-24
-    zcoef[4] = -2.46929568577390678055712987160325876321312377285599e-31
-    zcoef[5] = -7.40016953399249021667823040632784926032215181166411e-39
-    zcoef[6] = 4.21756086831535086775256556143298098377555103824524e-46
-    zcoef[7] = -7.90995787006734393072263251251053413138923617742665e-54
-    zcoef[8] = 6.96584174374744927048653426883823314263335677413527e-62
-    zcoef[9] = -2.42926517319393920651606665298459161434867679132808e-70
-
-    value = 0.0
-    for i in range(len(zcoef)):
-        value += zcoef[i] * p**i
-    return value
-
 def Z(p, T):  
     """
     Fator de compressibilidade do hidrogênio.
     """
-    return calculate_Z(p)
+    return calculate_Z(p,T)
 
 def epsilon(u):
     return sym(grad(u))
@@ -641,7 +622,7 @@ for ax, (values, title, cbar_label, cmap, levels, symmetric_range, vector_values
     cbar = fig.colorbar(contour, ax=ax)
     cbar.set_label(cbar_label)
 
-fig.suptitle("2D methane injection with fixed-stress coupling and Newton pressure solve")
+fig.suptitle("2D hydrogen injection with fixed-stress coupling and Newton pressure solve")
 fig.savefig(output_dir / "final_fields.png", dpi=200)
 plt.close(fig)
 
