@@ -3,6 +3,13 @@ import shutil     # shell utility
 import warnings   
 from pathlib import Path
 
+import sys
+from pathlib import Path
+
+repo_root = Path(__file__).resolve().parents[1]
+sys.path.append(str(repo_root))
+from thermodynamics.properties import calculate_Z
+
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from firedrake import (
@@ -141,10 +148,8 @@ def Z_methane(p):
 def Z(p, T):  
     """
     Fator de compressibilidade do hidrogênio.
-    Temporário: gás ideal.
-    Será substituído pelo modelo real H2.
     """
-    return 1.0
+    return calculate_Z(p)
 
 def epsilon(u):
     return sym(grad(u))
