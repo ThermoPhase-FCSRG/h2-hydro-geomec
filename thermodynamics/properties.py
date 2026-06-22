@@ -1,6 +1,9 @@
 # properties.py
 import numpy as np
 
+# =================
+# Fator de compressibilidade do hidrogênio (Z)
+# =================
 
 # Coeficientes do ajuste polinomial
 # Obtidos usando Peng-Robinson via NeqSim
@@ -27,9 +30,25 @@ def calculate_Z(P, T=300.0):
 
     return np.polyval(Z_coefficients, P)
 
-def calculate_viscosity(P,T=300):
+# =================
+# Viscosidade do hidrogênio (mu)
+# =================
+mu_coefficients = np.array([
+    1.47004003e-31,
+   -2.36789532e-23,
+   -5.71096443e-16,
+    7.82787947e-06,
+])
+
+
+def calculate_viscosity(P, T=300):
     """
     Viscosidade do hidrogênio.
-    Ajuste inicial.
+
+    P em Pa
+    T em K
+
+    Correlação ajustada para T=300 K
     """
-    return 0.94e-5  #precisa alterar esse valor. essse valor é pra T=50C
+
+    return np.polyval(mu_coefficients, P)

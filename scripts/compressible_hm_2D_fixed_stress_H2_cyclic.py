@@ -81,8 +81,8 @@ bar = 1.0e5     # 1 bar in Pa
 
 T = 300.0       # temperature in K
 
-# Methane viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
-gas_viscosity_value = 1.2e-5
+# hydrogen viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
+gas_viscosity_value = 7.8e-6  # Hydrogen viscosity at T=300 K
 gas_viscosity = Constant(gas_viscosity_value)
 
 # I use 5% immobile water and 90% mobile gas. A water saturation of 0.95 would
