@@ -118,8 +118,11 @@ depth = 2500.0
 overburden_stress = rock_density * gravity * depth
 p0 = overburden_stress
 p_reservoir = p0
-injection_overpressure = 10.0e6
-p_well = p0 + injection_overpressure
+
+
+p_injection = 700e5  # 700 bar
+p_production = 100e5
+
 top_traction = as_vector((0.0, -p0))
 
 
@@ -252,18 +255,64 @@ beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 
 
 # -----------------------------------------------------------------------------
+# Injection schedule
+#
+# Injection well:
+#   - 30 days ON  (700 bar)
+#   - 60 days OFF (no injection)
+#   - repeat for the whole simulation
+# -----------------------------------------------------------------------------
+def injection_schedule(time_days):
+
+    cycle_length = 90.0      # days (30 days injection + 60 days shut-in)
+    injection_time = 30.0    # days
+
+    cycle_time = time_days % cycle_length
+
+    if cycle_time < injection_time:  
+        return True          # injection ON
+    else:
+        return False         # injection OFF
+
+# for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
+    # print(day, injection_schedule(day))
+
+
+
+# -----------------------------------------------------------------------------
 # Boundary conditions
 #
 # Firedrake RectangleMesh boundary labels:
 #   1: x = 0, 2: x = Lx, 3: y = 0, 4: y = Ly.
 # -----------------------------------------------------------------------------
-pressure_bcs = [
-    DirichletBC(V, p_well, 1),
-]
+def hydraulic_bcs(time_days):
+    bcs = []
+
+    # Injection at x=0, cyclic operation
+    if injection_schedule(time_days):
+        bcs.append(
+            DirichletBC(V, p_injection, 1)  # injection ON
+        )
+    # else:    # No-flow at x=0 when injection is OFF
+
+    # protuction at x=Lx, always
+    bcs.append(
+        DirichletBC(V, p_production, 2)
+    )
+
+    return bcs
+
+# for day in [10, 50, 100]:
+    # print("teste")
+    # print(day, len(hydraulic_bcs(day)))
+
 mechanics_bcs = [
     DirichletBC(W.sub(1), 0.0, 3),
     DirichletBC(W.sub(0), 0.0, 2),
 ]
+
+
+
 
 
 # -----------------------------------------------------------------------------
@@ -343,16 +392,7 @@ F_pressure = (
     + dt * (permeability_newton / gas_viscosity) * pz * inner(grad(p), grad(v)) * dx
     + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
 )
-pressure_problem = NonlinearVariationalProblem(
-    F_pressure,
-    p,
-    bcs=pressure_bcs,
-    J=derivative(F_pressure, p),
-)
-pressure_solver = NonlinearVariationalSolver(
-    pressure_problem,
-    solver_parameters=newton_solver_parameters,
-)
+
 
 
 # -----------------------------------------------------------------------------
@@ -400,6 +440,20 @@ step = 0
 while step < total_steps:
     step += 1
     time_days = t / SECONDS_PER_DAY
+
+    hydraulic_bcs_current = hydraulic_bcs(time_days)
+
+    pressure_problem = NonlinearVariationalProblem(
+        F_pressure,
+        p,
+        bcs=hydraulic_bcs_current,
+        J=derivative(F_pressure, p),
+    )
+
+    pressure_solver = NonlinearVariationalSolver(
+        pressure_problem,
+        solver_parameters=newton_solver_parameters,
+    )
 
     p_iter.assign(p_n)
     phi_iter.assign(phi_n)
@@ -510,14 +564,17 @@ np.savetxt(
 (output_dir / "run_metadata.txt").write_text(
     "\n".join(
         [
-            "case=2D_fixed_stress_injection_training_newton",
+            "case=2D_fixed_stress_H2_cyclic_injection_production",
             f"mesh={numel_x}x{numel_y}",
             f"domain_m={Lx}x{Ly}",
             f"t_days={t_days}",
             f"dt_days={dt_days}",
             f"p0_Pa={p0}",
-            f"injection_overpressure_Pa={injection_overpressure}",
-            f"p_well_Pa={p_well}",
+            f"p_injection_Pa={p_injection}",
+            f"p_production_Pa={p_production}",
+            "hydraulic_schedule=injection_1_month_on_2_months_off",
+            "injector_boundary=x=0",
+            "producer_boundary=x=Lx",
             f"p_reservoir_Pa={p_reservoir}",
             f"overburden_stress_Pa={overburden_stress}",
             f"depth_m={depth}",
@@ -534,7 +591,7 @@ np.savetxt(
             f"poisson_ratio={poisson_ratio}",
             f"bulk_modulus_Pa={bulk_modulus_value}",
             "permeability_law=normalized_phi_over_3_minus_phi",
-            "pr_z_fit=same_coefficients_as_scripts/2D/compressible_hm_2D_transient_nl.py",
+            "pr_z_fit=same_coefficients_as_scripts/2D/compressible_hm_2D_transient_nl.py",    # rever !!!
             "nonlinear_solution=fixed_stress_outer_picard_with_newton_pressure_subproblem",
             "newton_snes_type=newtonls",
             "newton_linesearch=bt",
@@ -542,8 +599,8 @@ np.savetxt(
             "newton_atol=1e-10",
             "newton_stol=1e-10",
             "newton_max_iterations=20",
-            "hydraulic_bcs=p_left_p0_plus_10MPa_other_boundaries_no_flow",
-            "field_evolution_snapshot_days=5,30,180,365",
+            "hydraulic_bcs=injector_x0_cyclic_700bar_and_producer_xLx_constant_100bar",
+            "field_evolution_snapshot_days=30,60,90,180,270,365",
             "displacement_plot=injection_induced_displacement_magnitude_with_quiver_arrows",
             "projected_profile_plot=midheight_profiles_projected.png uses CG1 L2 projection for sigma_T and source_rate only",
             "initial_pressure_condition=uniform_p0",
@@ -571,7 +628,7 @@ field_data = [
         "Final pressure field",
         "Pressure [MPa]",
         "viridis",
-        np.linspace(p_reservoir / 1.0e6, p_well / 1.0e6, 51),
+        np.linspace(p_production / 1.0e6, p_injection / 1.0e6, 51),
         None,
         None,
     ),
@@ -643,7 +700,7 @@ if field_snapshots:
             "pressure",
             "Pressure [MPa]",
             "viridis",
-            np.linspace(p_reservoir / 1.0e6, p_well / 1.0e6, 51),
+            np.linspace(p_production / 1.0e6, p_injection / 1.0e6, 51),
         ),
         (
             "sigma_T",
