@@ -9,6 +9,7 @@ from pathlib import Path
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(repo_root))
 from thermodynamics.properties import calculate_Z
+from thermodynamics.properties import calculate_viscosity
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
@@ -81,9 +82,7 @@ bar = 1.0e5     # 1 bar in Pa
 
 T = 300.0       # temperature in K
 
-# hydrogen viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
-gas_viscosity_value = 7.8e-6  # Hydrogen viscosity at T=300 K
-gas_viscosity = Constant(gas_viscosity_value)
+
 
 # I use 5% immobile water and 90% mobile gas. A water saturation of 0.95 would
 # leave only 5% gas and the Corey gas relative permeability would be nearly zero.
@@ -125,6 +124,9 @@ p_production = 100e5
 
 top_traction = as_vector((0.0, -p0))
 
+# hydrogen viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
+# gas_viscosity_value = calculate_viscosity(p_reservoir, T)  # rever !!!
+# gas_viscosity = calculate_viscosity(p, T)
 
 # -----------------------------------------------------------------------------
 # Peng-Robinson compressibility factor, fitted polynomial Z(p, T)
@@ -134,6 +136,13 @@ def Z(p, T):
     Fator de compressibilidade do hidrogênio.
     """
     return calculate_Z(p,T)
+
+
+def mu(p, T):
+    """
+    Viscosidade do hidrogênio.
+    """
+    return calculate_viscosity(p,T)
 
 def epsilon(u):
     return sym(grad(u))
@@ -221,6 +230,9 @@ v = TestFunction(V)
 p = Function(V, name="pressure")
 p_n = Function(V, name="pressure_previous")
 p_iter = Function(V, name="pressure_fixed_stress")
+
+print(type(Z(p,T)))
+print(type(mu(p,T)))
 
 du = TrialFunction(W)
 w = TestFunction(W)
@@ -389,7 +401,7 @@ pz_n = p_n / Z(p_n, T)
 F_pressure = (
     gas_saturation_constant * phi_iter * (pz - pz_n) * v * dx
     + gas_saturation_constant * beta_r * pz * (p - p_n) * v * dx
-    + dt * (permeability_newton / gas_viscosity) * pz * inner(grad(p), grad(v)) * dx
+    + dt * (permeability_newton / calculate_viscosity(p, T)) * pz * inner(grad(p), grad(v)) * dx
     + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
 )
 
@@ -580,7 +592,7 @@ np.savetxt(
             f"depth_m={depth}",
             f"rock_density_kg_m3={rock_density}",
             f"gas_saturation={gas_saturation}",
-            f"gas_viscosity_Pa_s={gas_viscosity_value}",
+            "gas_viscosity=model_mu(p,T)_from_polynomial_fit", #f"gas_viscosity_Pa_s={gas_viscosity_value}",
             f"water_residual={water_residual}",
             f"gas_residual={gas_residual}",
             f"relative_permeability={k_rel_value}",
