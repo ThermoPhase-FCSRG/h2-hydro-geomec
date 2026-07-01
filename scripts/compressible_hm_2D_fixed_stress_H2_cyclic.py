@@ -93,7 +93,7 @@ gas_residual = 0.05
 # Marcellus-like poromechanical parameters from the thesis cases.
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
-grain_bulk_modulus = Constant(40.0e9)  # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
+grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
 alpha_biot_value = 0.91
 initial_porosity_value = 0.08
 initial_permeability_value = 6.0e-19
@@ -270,7 +270,7 @@ beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 # Injection schedule
 #
 # Injection well:
-#   - 30 days ON  (700 bar)
+#   - 30 days ON  (700 bar)  (no production)
 #   - 60 days OFF (no injection)
 #   - repeat for the whole simulation
 # -----------------------------------------------------------------------------
@@ -314,18 +314,10 @@ def hydraulic_bcs(time_days):
 
     return bcs
 
-# for day in [10, 50, 100]:
-    # print("teste")
-    # print(day, len(hydraulic_bcs(day)))
-
 mechanics_bcs = [
     DirichletBC(W.sub(1), 0.0, 3),
     DirichletBC(W.sub(0), 0.0, 2),
 ]
-
-
-
-
 
 # -----------------------------------------------------------------------------
 # Mechanics problem and initial geostatic reference state.
@@ -345,6 +337,13 @@ mechanics_solver_parameters = {
     "pc_type": "lu",
 }
 solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
+
+print("pressure injector:",
+      point_value(p, 0.0, Ly/2)/1e6)
+
+print("pressure inside:",
+      point_value(p, 1.0, Ly/2)/1e6)
+
 
 u_reference.assign(u)
 u_increment.interpolate(u - u_reference)
@@ -405,6 +404,7 @@ F_pressure = (
     + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
 )
 
+# -----------------------------------------------------------------------------
 
 
 # -----------------------------------------------------------------------------
@@ -438,7 +438,7 @@ XX, YY = np.meshgrid(x_plot, y_plot)
 
 profile_snapshots = []
 projected_profile_snapshots = []
-profile_days = {5.0, 30.0, 180.0, 365.0}
+profile_days = {5.0, 30.0, 180.0, 365.0}             # rever !!!
 field_snapshots = []
 history_rows = []
 
@@ -625,6 +625,11 @@ np.savetxt(
 )
 
 pressure_grid = sample_field(p, XX, YY) / 1.0e6
+
+print("GRID MAX =", np.max(pressure_grid))
+print("GRID MIN =", np.min(pressure_grid))
+print("GRID SHAPE =", pressure_grid.shape)
+
 sigma_grid = sample_field(sigma_t, XX, YY) / 1.0e6
 source_grid = sample_field(source_rate, XX, YY) * SECONDS_PER_DAY / 1.0e6
 displacement_grid = sample_vector_field(u_increment, XX, YY)
@@ -640,7 +645,7 @@ field_data = [
         "Final pressure field",
         "Pressure [MPa]",
         "viridis",
-        np.linspace(p_production / 1.0e6, p_injection / 1.0e6, 51),
+        np.linspace(p_production / 1.0e6, p_injection / 1.0e6  , 51),
         None,
         None,
     ),
@@ -664,6 +669,7 @@ field_data = [
         (ux_grid, uy_grid),
     ),
 ]
+
 
 for ax, (values, title, cbar_label, cmap, levels, symmetric_range, vector_values) in zip(axes, field_data):
     if levels is not None:
