@@ -34,7 +34,9 @@ Quantities of interest will typically include pressure histories, cumulative
 injection/production, working gas recovery, porosity and permeability changes,
 displacement, stress response, and differences between coupling strategies.
 
-## Requirement: Firedrake
+## Environment Setup
+
+### Requirement: Firedrake
 
 The simulations depend on
 [Firedrake](https://www.firedrakeproject.org/), a Python finite-element framework
@@ -63,14 +65,40 @@ Check that the active Python can import Firedrake:
 python -c "import firedrake; print('Firedrake is available')"
 ```
 
-Also check the plotting dependencies used by the scripts:
+### Additional Python Dependencies
+
+After activating the Firedrake environment, install the extra Python packages
+listed in `requirements.txt`:
 
 ```bash
-python -c "import numpy, matplotlib; print('NumPy and Matplotlib are available')"
+python -m pip install -r requirements.txt
+```
+
+Run this command from the repository root so that `pip` can find the
+`requirements.txt` file. Installing these packages inside the active Firedrake
+environment is important because the simulation scripts need Firedrake and the
+additional scientific/plotting/thermodynamic packages in the same Python
+environment.
+
+The current additional dependencies are:
+
+- `scipy`
+- `matplotlib`
+- `numpy`
+- `pandas`
+- `meshio`
+- `vtk`
+- `neqsim`
+
+Check that the active Python can import the main dependencies:
+
+```bash
+python -c "import firedrake, numpy, scipy, matplotlib, pandas, meshio, vtk, neqsim; print('Environment is ready')"
 ```
 
 If one of these checks fails, the most common reason is that the Firedrake
-environment is not active in the terminal where you are running the command.
+environment is not active in the terminal where you are running the command, or
+the extra dependencies were installed into a different Python environment.
 
 ## Running the Code
 
