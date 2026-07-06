@@ -460,7 +460,6 @@ time_history = []
 production_history = []
 accumulated_history = []
 
-accumulated_production = 0.0
 
 # -----------------------------------------------------------------------------
 # Time loop
@@ -548,12 +547,12 @@ while step < total_steps:
     )
     production_accumulated += production_rate * dt_seconds
 
-    production_rate_history.append(production_rate)
-    production_accumulated_history.append(production_accumulated)
+    # production_rate_history.append(production_rate) # rever/remover depois
+    # production_accumulated_history.append(production_accumulated) # rever/remover depois
     
     time_history.append(time_days)
     production_history.append(production_rate)
-    accumulated_history.append(accumulated_production)
+    accumulated_history.append(production_accumulated)
 
     print(
     f"Day {time_days:5.1f} "
@@ -871,5 +870,37 @@ if projected_profile_snapshots:
     fig.suptitle("Mid-height transient profiles (CG1 visualization projection)")
     fig.savefig(output_dir / "midheight_profiles_projected.png", dpi=200)
     plt.close(fig)
+
+# -----------------------------------------------------------------------------
+# Accumulated production plot
+
+print(time_history[-5:])
+print(production_history[-5:])
+print(accumulated_history[-5:])
+
+
+plt.figure(figsize=(8,5))
+
+plt.plot(
+    time_history,
+    accumulated_history,
+    linewidth=2,
+    label="Production"
+)
+
+plt.xlabel("Time (days)")
+plt.ylabel("Accumulated production")
+plt.title("Accumulated hydrogen production")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+
+plt.savefig(output_dir / "accumulated_production.png", dpi=300)
+
+plt.close()
+# -----------------------------------------------------------------------------
+
+
 
 print(f"Wrote VTK, CSV diagnostics, and PNG plots to {output_dir}")
