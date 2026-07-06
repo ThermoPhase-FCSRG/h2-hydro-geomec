@@ -944,11 +944,11 @@ hydro = np.loadtxt(
     delimiter=",",
     skiprows=1,
 )# ---plt.figure(figsize=(7,4))
-plt.plot(geo[:,0], geo[:,2], label="Com geomecânica")
-plt.plot(hydro[:,0], hydro[:,2], label="Sem geomecânica")
+plt.plot(geo[:,0], geo[:,2], label="With geomechanics")
+plt.plot(hydro[:,0], hydro[:,2], label="Without geomechanics")
 
-plt.xlabel("Tempo (dias)")
-plt.ylabel("Produção acumulada")
+plt.xlabel("Time (days)")
+plt.ylabel("Accumulated production")
 plt.grid(True)
 plt.legend()
 
