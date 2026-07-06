@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from pathlib import Path
 
+
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(repo_root))
 from thermodynamics.properties import calculate_Z
@@ -16,6 +17,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 from firedrake import (
     Constant,
     DirichletBC,
+    FacetNormal,
     Function,
     FunctionSpace,
     NonlinearVariationalProblem,
@@ -25,6 +27,7 @@ from firedrake import (
     TrialFunction,
     VectorFunctionSpace,
     as_vector,
+    assemble,
     derivative,
     div,
     dot,
@@ -80,7 +83,7 @@ W = VectorFunctionSpace(mesh, "CG", degree)
 # -----------------------------------------------------------------------------
 bar = 1.0e5     # 1 bar in Pa
 
-T = 300.0       # temperature in K
+T = 350.0       # temperature in K. aproximadamente 77°C
 
 
 
@@ -91,10 +94,15 @@ water_residual = 0.05
 gas_residual = 0.05
 
 # Marcellus-like poromechanical parameters from the thesis cases.
+enable_geomechanics = True
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
 grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
-alpha_biot_value = 0.91
+if enable_geomechanics:
+    alpha_biot_value = 0.91
+else: 
+    alpha_biot_value = 0.0
+
 initial_porosity_value = 0.08
 initial_permeability_value = 6.0e-19
 alpha_biot = Constant(alpha_biot_value)
@@ -264,7 +272,10 @@ phi0.assign(initial_porosity_value)
 phi.assign(phi0)
 phi_n.assign(phi0)
 phi_iter.assign(phi0)
-inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+if enable_geomechanics:
+    inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+else:
+    inv_n.interpolate(Constant(0.0))
 beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 
 
@@ -418,7 +429,14 @@ F_pressure = (
 # Outputs
 # -----------------------------------------------------------------------------
 repo_root = Path(__file__).resolve().parents[1]
-output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_H2_cyclic"
+repo_root = Path(__file__).resolve().parents[1]
+
+if enable_geomechanics:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
+else:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
+
+output_dir = repo_root / "outputs" / "2D" / case_name
 output_dir.mkdir(parents=True, exist_ok=True)
 for output_file in (
     "fields.pvd",
@@ -450,12 +468,30 @@ field_snapshots = []
 history_rows = []
 
 
+
+# -----------------------------------------------------------------------------
+# Production history
+# -----------------------------------------------------------------------------
+time_history = []
+production_history = []
+accumulated_history = []
+
+
 # -----------------------------------------------------------------------------
 # Time loop
 # -----------------------------------------------------------------------------
 total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
+n = FacetNormal(mesh) 
+flux_vector= (
+    -(permeability_newton / calculate_viscosity(p, T))
+    * (p / Z(p, T))
+    * grad(p)
+)
+production_rate_history = []
+production_accumulated_history = []
+production_accumulated = 0.0
 while step < total_steps:
     step += 1
     time_days = t / SECONDS_PER_DAY
@@ -520,6 +556,26 @@ while step < total_steps:
     source_rate.interpolate(
         -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
+
+    flux_expression = dot(flux_vector, n)
+    production_rate = assemble( # esse número representa a produção instantanea 
+        flux_expression * ds(2)      # assemble calcula a integral e ds(2) representa a fronteira do produtor
+    )
+    production_accumulated += production_rate * dt_seconds
+
+    # production_rate_history.append(production_rate) # rever/remover depois
+    # production_accumulated_history.append(production_accumulated) # rever/remover depois
+    
+    time_history.append(time_days)
+    production_history.append(production_rate)
+    accumulated_history.append(production_accumulated)
+
+    print(
+    f"Day {time_days:5.1f} "
+    f"Production = {production_rate:.6e} "
+    f"Accumulated = {production_accumulated:.6e}"
+    )
+    
 
     p_n.assign(p)
     u_n.assign(u)
@@ -830,5 +886,73 @@ if projected_profile_snapshots:
     fig.suptitle("Mid-height transient profiles (CG1 visualization projection)")
     fig.savefig(output_dir / "midheight_profiles_projected.png", dpi=200)
     plt.close(fig)
+
+# -----------------------------------------------------------------------------
+# Accumulated production plot
+
+print(time_history[-5:])
+print(production_history[-5:])
+print(accumulated_history[-5:])
+
+
+plt.figure(figsize=(8,5))
+
+plt.plot(
+    time_history,
+    accumulated_history,
+    linewidth=2,
+    label="Production"
+)
+
+plt.xlabel("Time (days)")
+plt.ylabel("Accumulated production")
+plt.title("Accumulated hydrogen production")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+
+plt.savefig(output_dir / "accumulated_production.png", dpi=300)
+
+plt.close()
+# -----------------------------------------------------------------------------
+np.savetxt(
+    output_dir / "production_history.csv",
+    np.column_stack((
+        time_history,
+        production_history,
+        accumulated_history,
+    )),
+    delimiter=",",
+    header="time_days,production_rate,production_accumulated",
+    comments="",
+)# -----------------------------------------------------------------------------
+# plot comparation of hidrodinamic vs geomechanical cases
+
+geo = np.loadtxt(
+    repo_root / "outputs" / "2D"
+    / "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
+    / "production_history.csv",
+    delimiter=",",
+    skiprows=1,
+)
+
+hydro = np.loadtxt(
+    repo_root / "outputs" / "2D"
+    / "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
+    / "production_history.csv",
+    delimiter=",",
+    skiprows=1,
+)# ---plt.figure(figsize=(7,4))
+plt.plot(geo[:,0], geo[:,2], label="With geomechanics")
+plt.plot(hydro[:,0], hydro[:,2], label="Without geomechanics")
+
+plt.xlabel("Time (days)")
+plt.ylabel("Accumulated production")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.savefig(output_dir.parent / "production_comparison.png", dpi=300)
 
 print(f"Wrote VTK, CSV diagnostics, and PNG plots to {output_dir}")

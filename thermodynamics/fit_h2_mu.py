@@ -14,7 +14,7 @@ P = P_bar*1e5
 
 
 # temperaturas
-T_values = [300]
+T_values = [350]
 
 
 for T in T_values:
