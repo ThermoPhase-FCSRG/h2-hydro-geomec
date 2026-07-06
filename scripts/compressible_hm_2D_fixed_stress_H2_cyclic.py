@@ -452,6 +452,16 @@ field_snapshots = []
 history_rows = []
 
 
+
+# -----------------------------------------------------------------------------
+# Production history
+# -----------------------------------------------------------------------------
+time_history = []
+production_history = []
+accumulated_history = []
+
+accumulated_production = 0.0
+
 # -----------------------------------------------------------------------------
 # Time loop
 # -----------------------------------------------------------------------------
@@ -541,6 +551,10 @@ while step < total_steps:
     production_rate_history.append(production_rate)
     production_accumulated_history.append(production_accumulated)
     
+    time_history.append(time_days)
+    production_history.append(production_rate)
+    accumulated_history.append(accumulated_production)
+
     print(
     f"Day {time_days:5.1f} "
     f"Production = {production_rate:.6e} "
