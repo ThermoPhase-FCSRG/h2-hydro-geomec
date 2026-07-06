@@ -16,6 +16,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 from firedrake import (
     Constant,
     DirichletBC,
+    FacetNormal,
     Function,
     FunctionSpace,
     NonlinearVariationalProblem,
@@ -25,6 +26,7 @@ from firedrake import (
     TrialFunction,
     VectorFunctionSpace,
     as_vector,
+    assemble,
     derivative,
     div,
     dot,
@@ -456,6 +458,15 @@ history_rows = []
 total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
+n = FacetNormal(mesh) 
+flux_vector= (
+    -(permeability_newton / calculate_viscosity(p, T))
+    * (p / Z(p, T))
+    * grad(p)
+)
+production_rate_history = []
+production_accumulated_history = []
+production_accumulated = 0.0
 while step < total_steps:
     step += 1
     time_days = t / SECONDS_PER_DAY
@@ -520,6 +531,22 @@ while step < total_steps:
     source_rate.interpolate(
         -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
+
+    flux_expression = dot(flux_vector, n)
+    production_rate = assemble( # esse número representa a produção instantanea 
+        flux_expression * ds(2)      # assemble calcula a integral e ds(2) representa a fronteira do produtor
+    )
+    production_accumulated += production_rate * dt_seconds
+
+    production_rate_history.append(production_rate)
+    production_accumulated_history.append(production_accumulated)
+    
+    print(
+    f"Day {time_days:5.1f} "
+    f"Production = {production_rate:.6e} "
+    f"Accumulated = {production_accumulated:.6e}"
+    )
+    
 
     p_n.assign(p)
     u_n.assign(u)
