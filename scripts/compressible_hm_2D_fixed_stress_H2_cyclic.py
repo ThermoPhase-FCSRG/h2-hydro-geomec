@@ -286,8 +286,8 @@ def injection_schedule(time_days):
     else:
         return False         # injection OFF
 
-# for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
-    # print(day, injection_schedule(day))
+for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
+    print(day, injection_schedule(day))
 
 
 
@@ -305,13 +305,16 @@ def hydraulic_bcs(time_days):
         bcs.append(
             DirichletBC(V, p_injection, 1)  # injection ON
         )
-    # else:    # No-flow at x=0 when injection is OFF
-
-    # protuction at x=Lx, always
-    bcs.append(
-        DirichletBC(V, p_production, 2)
+    else:    # No-flow at x=0 when injection is OFF but production is ON
+        # protuction at x=Lx, always
+        bcs.append(
+            DirichletBC(V, p_production, 2)
+        )
+    print(
+    "day=", time_days,
+    "injection=", injection_schedule(time_days),
+    "number BCs=", len(bcs)
     )
-
     return bcs
 
 mechanics_bcs = [
@@ -438,7 +441,7 @@ XX, YY = np.meshgrid(x_plot, y_plot)
 
 profile_snapshots = []
 projected_profile_snapshots = []
-profile_days = {5.0, 30.0, 180.0, 365.0}             # rever !!!
+profile_days = {5.0, 30.0, 60.0, 90.0, 180.0, 365.0}             # rever !!!
 field_snapshots = []
 history_rows = []
 
@@ -695,6 +698,16 @@ for ax, (values, title, cbar_label, cmap, levels, symmetric_range, vector_values
     if vector_values is not None:
         add_displacement_quiver(ax, *vector_values)
     cbar = fig.colorbar(contour, ax=ax)
+    """
+    if cbar_label == "Pressure [MPa]":
+        cbar = fig.colorbar(
+            contour,
+            ax=ax,
+            ticks=np.linspace(10,70,7)
+    )
+    else:
+        cbar = fig.colorbar(contour, ax=ax)
+    """
     cbar.set_label(cbar_label)
 
 fig.suptitle("2D hydrogen injection with fixed-stress coupling and Newton pressure solve")
