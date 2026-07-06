@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from pathlib import Path
 
+
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.append(str(repo_root))
 from thermodynamics.properties import calculate_Z
@@ -93,10 +94,15 @@ water_residual = 0.05
 gas_residual = 0.05
 
 # Marcellus-like poromechanical parameters from the thesis cases.
+enable_geomechanics = True
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
 grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
-alpha_biot_value = 0.91
+if enable_geomechanics:
+    alpha_biot_value = 0.91
+else: 
+    alpha_biot_value = 0.0
+
 initial_porosity_value = 0.08
 initial_permeability_value = 6.0e-19
 alpha_biot = Constant(alpha_biot_value)
@@ -266,7 +272,10 @@ phi0.assign(initial_porosity_value)
 phi.assign(phi0)
 phi_n.assign(phi0)
 phi_iter.assign(phi0)
-inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+if enable_geomechanics:
+    inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+else:
+    inv_n.interpolate(Constant(0.0))
 beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 
 
@@ -420,7 +429,14 @@ F_pressure = (
 # Outputs
 # -----------------------------------------------------------------------------
 repo_root = Path(__file__).resolve().parents[1]
-output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_H2_cyclic"
+repo_root = Path(__file__).resolve().parents[1]
+
+if enable_geomechanics:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
+else:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
+
+output_dir = repo_root / "outputs" / "2D" / case_name
 output_dir.mkdir(parents=True, exist_ok=True)
 for output_file in (
     "fields.pvd",
@@ -900,7 +916,43 @@ plt.savefig(output_dir / "accumulated_production.png", dpi=300)
 
 plt.close()
 # -----------------------------------------------------------------------------
+np.savetxt(
+    output_dir / "production_history.csv",
+    np.column_stack((
+        time_history,
+        production_history,
+        accumulated_history,
+    )),
+    delimiter=",",
+    header="time_days,production_rate,production_accumulated",
+    comments="",
+)# -----------------------------------------------------------------------------
+# plot comparation of hidrodinamic vs geomechanical cases
 
+geo = np.loadtxt(
+    repo_root / "outputs" / "2D"
+    / "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
+    / "production_history.csv",
+    delimiter=",",
+    skiprows=1,
+)
 
+hydro = np.loadtxt(
+    repo_root / "outputs" / "2D"
+    / "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
+    / "production_history.csv",
+    delimiter=",",
+    skiprows=1,
+)# ---plt.figure(figsize=(7,4))
+plt.plot(geo[:,0], geo[:,2], label="Com geomecânica")
+plt.plot(hydro[:,0], hydro[:,2], label="Sem geomecânica")
+
+plt.xlabel("Tempo (dias)")
+plt.ylabel("Produção acumulada")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.savefig(output_dir.parent / "production_comparison.png", dpi=300)
 
 print(f"Wrote VTK, CSV diagnostics, and PNG plots to {output_dir}")
