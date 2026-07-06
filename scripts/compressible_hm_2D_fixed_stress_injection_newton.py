@@ -228,6 +228,8 @@ du = TrialFunction(W)
 w = TestFunction(W)
 u = Function(W, name="displacement")
 u_reference = Function(W, name="reference_displacement")
+u_n = Function(W, name="displacement_previous")
+u_iter = Function(W, name="displacement_fixed_stress")
 u_increment = Function(W, name="injection_induced_displacement")
 
 phi0 = Function(Q0, name="initial_porosity")
@@ -291,6 +293,8 @@ mechanics_solver_parameters = {
 solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
 
 u_reference.assign(u)
+u_n.assign(u)
+u_iter.assign(u)
 u_increment.interpolate(u - u_reference)
 div_u_reference.interpolate(div(u_reference))
 sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
@@ -363,7 +367,7 @@ pressure_solver = NonlinearVariationalSolver(
 # -----------------------------------------------------------------------------
 # Outputs
 # -----------------------------------------------------------------------------
-repo_root = Path(__file__).resolve().parents[2]
+repo_root = Path(__file__).resolve().parents[1]
 output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_injection_newton"
 output_dir.mkdir(parents=True, exist_ok=True)
 for output_file in (
@@ -407,6 +411,7 @@ while step < total_steps:
     time_days = t / SECONDS_PER_DAY
 
     p_iter.assign(p_n)
+    u_iter.assign(u_n)
     phi_iter.assign(phi_n)
     sigma_iter.assign(sigma_n)
 
@@ -416,26 +421,28 @@ while step < total_steps:
         p.assign(p_iter)
         pressure_solver.solve()
         last_newton_iterations = int(pressure_solver.snes.getIterationNumber())
-        pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p, mesh=mesh), 1.0)
+        pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p_iter, mesh=mesh), 1.0)
 
         l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
         solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
         u_increment.interpolate(u - u_reference)
+        displacement_change = norm(u - u_iter, mesh=mesh) / max(norm(u_iter, mesh=mesh), 1.0)
 
         # Porosity evolves from the mechanically equilibrated reservoir state.
         # sigma_T itself is kept absolute, so sigma_T - sigma_T_previous is the
         # stress increment used by the fixed-stress source term.
-        phi.interpolate(phi0 + alpha_biot * (div(u) - div_u_reference) + inv_n * (p - p_reservoir))
+        phi.interpolate(phi0 + alpha_biot * div(u) + inv_n * (p - p_reservoir))
         sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
 
-        phi_change = norm(phi - phi_iter, mesh=mesh) / max(norm(phi, mesh=mesh), 1.0)
-        sigma_change = norm(sigma_t - sigma_iter, mesh=mesh) / max(norm(sigma_t, mesh=mesh), 1.0)
+        phi_change = norm(phi - phi_iter, mesh=mesh) / max(norm(phi_iter, mesh=mesh), 1.0)
+        sigma_change = norm(sigma_t - sigma_iter, mesh=mesh) / max(norm(sigma_iter, mesh=mesh), 1.0)
 
         p_iter.assign(p)
+        u_iter.assign(u)
         phi_iter.assign(phi)
         sigma_iter.assign(sigma_t)
 
-        if max(pressure_change, phi_change, sigma_change) < fixed_stress_tolerance:
+        if max(pressure_change, phi_change, sigma_change, displacement_change) < fixed_stress_tolerance:
             converged = True
             break
 
@@ -451,6 +458,7 @@ while step < total_steps:
     )
 
     p_n.assign(p)
+    u_n.assign(u)
     phi_n.assign(phi)
     sigma_n.assign(sigma_t)
 
