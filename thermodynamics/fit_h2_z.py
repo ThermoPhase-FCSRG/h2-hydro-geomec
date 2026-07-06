@@ -11,7 +11,7 @@ P_bar = np.linspace(100, 700, 50)
 # converter bar -> Pa
 P = P_bar * 1e5
 
-T = 300.0
+T = 350.0
 
 
 Z_values = []
