@@ -80,7 +80,7 @@ W = VectorFunctionSpace(mesh, "CG", degree)
 # -----------------------------------------------------------------------------
 bar = 1.0e5     # 1 bar in Pa
 
-T = 300.0       # temperature in K
+T = 350.0       # temperature in K
 
 
 

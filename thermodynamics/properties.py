@@ -16,7 +16,7 @@ Z_coefficients = np.array([
 ])
 
 
-def calculate_Z(P, T=300.0):
+def calculate_Z(P, T=350.0):
     """
     Fator de compressibilidade do hidrogênio.
 
@@ -41,14 +41,14 @@ mu_coefficients = np.array([
 ])
 
 
-def calculate_viscosity(P, T=300):
+def calculate_viscosity(P, T=350.0):
     """
     Viscosidade do hidrogênio.
 
     P em Pa
     T em K
 
-    Correlação ajustada para T=300 K
+    Correlação ajustada para T=350 K
     """
 
     return np.polyval(mu_coefficients, P)
