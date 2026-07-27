@@ -122,6 +122,10 @@ p_reservoir = p0
 p_injection = 700e5  # 700 bar
 p_production = 100e5
 
+pw_left = Constant(p_reservoir)
+pw_right = Constant(p_reservoir)
+
+
 top_traction = as_vector((0.0, -p0))
 
 # hydrogen viscosity; the fitted Peng-Robinson polynomial below supplies Z(p, T).
@@ -292,7 +296,27 @@ def operation_mode(time_days):
 for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de testar !!!
     print(day, operation_mode(day))
 
+# -------------------------------------
+def update_well_pressures(time_days):
+    mode = operation_mode(time_days)
 
+    if mode == "injection":
+
+        pw_left.assign(p_injection)
+        pw_right.assign(p_reservoir)
+
+    elif mode == "stop":
+
+        pw_left.assign(p_reservoir)
+        pw_right.assign(p_reservoir)
+
+    elif mode == "production":
+
+        pw_left.assign(p_reservoir)
+        pw_right.assign(p_production)
+
+gamma_left  = Constant(1e-8)   # depois rever (!!!) e mudar para well index
+gamma_right = Constant(1e-8)
 
 # -----------------------------------------------------------------------------
 # Boundary conditions
@@ -301,6 +325,7 @@ for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de tes
 #   1: x = 0, 2: x = Lx, 3: y = 0, 4: y = Ly.
 # -----------------------------------------------------------------------------
 def hydraulic_bcs(time_days):
+    """
     bcs = []
     mode = operation_mode(time_days)
 
@@ -321,7 +346,9 @@ def hydraulic_bcs(time_days):
     "mode=", operation_mode(time_days),
     "number BCs=", len(bcs)
     )
-    return bcs
+    return bcs 
+    """
+    return []
 
 mechanics_bcs = [
     DirichletBC(W.sub(1), 0.0, 3),
@@ -415,6 +442,24 @@ F_pressure = (
     + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
 )
 
+F_pressure += (
+    dt
+    * gamma_left
+    * pz
+    * (p - pw_left)
+    * v
+    * ds(1)
+)
+
+F_pressure += (
+    dt
+    * gamma_right
+    * pz
+    * (p - pw_right)
+    * v
+    * ds(2)
+)
+
 # -----------------------------------------------------------------------------
 
 
@@ -460,16 +505,19 @@ history_rows = []
 total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
+
 while step < total_steps:
     step += 1
     time_days = t / SECONDS_PER_DAY
 
-    hydraulic_bcs_current = hydraulic_bcs(time_days)
+    update_well_pressures(time_days)
+
+    # hydraulic_bcs_current = hydraulic_bcs(time_days)
 
     pressure_problem = NonlinearVariationalProblem(
         F_pressure,
         p,
-        bcs=hydraulic_bcs_current,
+        # bcs=hydraulic_bcs_current,
         J=derivative(F_pressure, p),
     )
 
