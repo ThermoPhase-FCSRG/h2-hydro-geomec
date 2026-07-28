@@ -148,6 +148,8 @@ def mu(p, T):
     """
     return calculate_viscosity(p,T)
 
+print("Viscosidade no reservatório =", mu(p_reservoir, T))
+
 def epsilon(u):
     return sym(grad(u))
 
@@ -315,8 +317,39 @@ def update_well_pressures(time_days):
         pw_left.assign(p_reservoir)
         pw_right.assign(p_production)
 
-gamma_left  = Constant(1e-8)   # depois rever (!!!) e mudar para well index
-gamma_right = Constant(1e-8)
+# gamma_left  = Constant(1e-8)   # depois rever (!!!) e mudar para well index
+# gamma_right = Constant(1e-8)
+
+# -----------------------------------------------------------------
+# Well index 
+# -----------------------------------------------------------------
+
+rw_left = 0.10
+rw_right = 0.10
+
+skin_left = 0.0
+skin_right = 0.0
+
+re_left = 0.2
+re_right = 0.2
+
+WI_left = (
+    2*np.pi
+    * initial_permeability_value
+    * Ly
+    / (np.log(re_left/rw_left) + skin_left)
+)
+
+WI_right = (
+    2*np.pi
+    * initial_permeability_value
+    * Ly
+    /(np.log(re_right/rw_right) + skin_right)
+)
+
+print(f"WI inicial = {WI_left:.6e} m³")
+print(f"WI inicial = {WI_right:.6e} m³")
+
 
 # -----------------------------------------------------------------------------
 # Boundary conditions
@@ -444,7 +477,7 @@ F_pressure = (
 
 F_pressure += (
     dt
-    * gamma_left
+    * WI_left / calculate_viscosity(p, T)
     * pz
     * (p - pw_left)
     * v
@@ -453,7 +486,7 @@ F_pressure += (
 
 F_pressure += (
     dt
-    * gamma_right
+    * WI_right/calculate_viscosity(p, T)
     * pz
     * (p - pw_right)
     * v
