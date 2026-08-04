@@ -25,6 +25,7 @@ from firedrake import (
     TrialFunction,
     VectorFunctionSpace,
     as_vector,
+    assemble,
     derivative,
     div,
     dot,
@@ -36,6 +37,7 @@ from firedrake import (
     project,
     solve,
     sym,   # symmetric gradient for linear elasticity
+    FacetNormal,
 )
 from firedrake.output import VTKFile
 
@@ -82,7 +84,7 @@ bar = 1.0e5     # 1 bar in Pa
 
 T = 350.0       # temperature in K
 
-
+enable_geomechanics = True
 
 # I use 5% immobile water and 90% mobile gas. A water saturation of 0.95 would
 # leave only 5% gas and the Corey gas relative permeability would be nearly zero.
@@ -531,13 +533,29 @@ profile_days = {5.0, 30.0, 60.0, 90.0, 180.0, 365.0}             # rever !!!
 field_snapshots = []
 history_rows = []
 
+# -----------------------------------------------------------------------------
+# Production history
+# -----------------------------------------------------------------------------
+time_history = []
+production_rate_history = []
+production_accumulated_history = []
 
+production_accumulated = 0.0
 # -----------------------------------------------------------------------------
 # Time loop
 # -----------------------------------------------------------------------------
 total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
+
+n = FacetNormal(mesh) 
+
+flux_vector = (
+    -(permeability_newton / calculate_viscosity(p, T))
+    * (p / Z(p, T))
+    * grad(p)
+)
+
 
 while step < total_steps:
     step += 1
@@ -571,6 +589,7 @@ while step < total_steps:
         pressure_solver.solve()
         last_newton_iterations = int(pressure_solver.snes.getIterationNumber())
         pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p_iter, mesh=mesh), 1.0)
+
 
         l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
         solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
@@ -606,6 +625,20 @@ while step < total_steps:
         -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
 
+    flux_expression = dot(flux_vector,n)
+    production_rate = assemble(
+        flux_expression * ds(2)
+    )
+
+    production_accumulated += production_rate * dt_seconds
+    production_rate_history.append(production_rate)
+    production_accumulated_history.append(production_accumulated)
+
+    print(
+        f"Day {time_days:5.1f} "
+        f"Production = {production_rate:.6e} "
+        f"Accumulated = {production_accumulated:.6e}"
+    )
     p_n.assign(p)
     u_n.assign(u)
     phi_n.assign(phi)
