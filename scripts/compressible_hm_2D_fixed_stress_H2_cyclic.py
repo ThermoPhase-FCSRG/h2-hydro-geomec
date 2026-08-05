@@ -96,7 +96,10 @@ gas_residual = 0.05
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
 grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
-alpha_biot_value = 0.91
+if enable_geomechanics:
+    alpha_biot_value = 0.91
+else:
+    alpha_biot_value = 0.0
 initial_porosity_value = 0.08
 initial_permeability_value = 6.0e-19
 alpha_biot = Constant(alpha_biot_value)
@@ -272,7 +275,11 @@ phi0.assign(initial_porosity_value)
 phi.assign(phi0)
 phi_n.assign(phi0)
 phi_iter.assign(phi0)
-inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+# inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+if enable_geomechanics:
+    inv_n.interpolate((alpha_biot - phi0) / grain_bulk_modulus)
+else:
+    inv_n.interpolate(Constant(0.0))
 beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 
 
@@ -502,8 +509,13 @@ F_pressure += (
 # Outputs
 # -----------------------------------------------------------------------------
 repo_root = Path(__file__).resolve().parents[1]
-output_dir = repo_root / "outputs" / "2D" / "compressible_hm_2D_fixed_stress_H2_cyclic"
-output_dir.mkdir(parents=True, exist_ok=True)
+if enable_geomechanics:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
+else:
+    case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
+
+output_directory = repo_root / "outputs" / "2D" / case_name
+output_directory.mkdir(parents=True, exist_ok=True)
 for output_file in (
     "fields.pvd",
     "final_fields.png",
@@ -513,14 +525,14 @@ for output_file in (
     "run_metadata.txt",
     "time_history.csv",
 ):
-    path = output_dir / output_file
+    path = output_directory / output_file
     if path.exists():
         path.unlink()
-fields_dir = output_dir / "fields"
+fields_dir = output_directory / "fields"
 if fields_dir.exists():
     shutil.rmtree(fields_dir)
 
-outfile = VTKFile(str(output_dir / "fields.pvd"))
+outfile = VTKFile(str(output_directory / "fields.pvd"))
 outfile.write(p, phi, sigma_t, source_rate, u, u_increment, time=0.0)
 
 x_plot = np.linspace(0.0, Lx, 301)
@@ -537,10 +549,11 @@ history_rows = []
 # Production history
 # -----------------------------------------------------------------------------
 time_history = []
-production_rate_history = []
-production_accumulated_history = []
+production_history = []
+accumulated_history = []
 
-production_accumulated = 0.0
+production_accumulated = 0.0                           
+
 # -----------------------------------------------------------------------------
 # Time loop
 # -----------------------------------------------------------------------------
@@ -549,13 +562,6 @@ t = dt_seconds
 step = 0
 
 n = FacetNormal(mesh) 
-
-flux_vector = (
-    -(permeability_newton / calculate_viscosity(p, T))
-    * (p / Z(p, T))
-    * grad(p)
-)
-
 
 while step < total_steps:
     step += 1
@@ -586,7 +592,18 @@ while step < total_steps:
     last_newton_iterations = 0
     for iteration in range(1, max_fixed_stress_iterations + 1):
         p.assign(p_iter)
+
+        print("ANTES")
+        print("min =", p.dat.data_ro.min())
+        print("max =", p.dat.data_ro.max())
+
         pressure_solver.solve()
+
+        print("DEPOIS")
+        print("min =", p.dat.data_ro.min())
+        print("max =", p.dat.data_ro.max())
+    
+
         last_newton_iterations = int(pressure_solver.snes.getIterationNumber())
         pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p_iter, mesh=mesh), 1.0)
 
@@ -620,19 +637,45 @@ while step < total_steps:
             f"{max_fixed_stress_iterations} iterations."
         )
 
+    flux_vector = (
+        -(permeability_newton / calculate_viscosity(p, T))
+        * (p / Z(p, T))
+        * grad(p)
+    )
+    q_left = assemble(dot(flux_vector, n) * ds(1))
+    q_right = assemble(dot(flux_vector, n) * ds(2))
+
+    print(f"day={time_days:.1f}")
+    print(f"mode={operation_mode(time_days)}")
+    print(f"q_left ={q_left:.6e}")
+    print(f"q_right={q_right:.6e}")
+
     dsigma_total_dt.interpolate((sigma_t - sigma_n) / dt)
     source_rate.interpolate(
         -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
+
+    print("Pressure at producer:",
+      point_value(p,Lx,Ly/2))
+
+    print("Producer pressure:",
+        float(pw_right))
+
+    print("Pressure difference:",
+        point_value(p,Lx,Ly/2)-float(pw_right))
 
     flux_expression = dot(flux_vector,n)
     production_rate = assemble(
         flux_expression * ds(2)
     )
 
+    # Atualiza a produção acumulada
     production_accumulated += production_rate * dt_seconds
-    production_rate_history.append(production_rate)
-    production_accumulated_history.append(production_accumulated)
+
+    # salva os históricos 
+    time_history.append(time_days)
+    production_history.append(production_rate)
+    accumulated_history.append(production_accumulated)
 
     print(
         f"Day {time_days:5.1f} "
@@ -690,7 +733,7 @@ while step < total_steps:
 # CSV diagnostics and plots
 # -----------------------------------------------------------------------------
 np.savetxt(
-    output_dir / "time_history.csv",
+    output_directory / "time_history.csv",
     np.array(history_rows),
     fmt=["%d"] + ["%.10e"] * 9 + ["%d", "%d"],
     delimiter=",",
@@ -702,7 +745,7 @@ np.savetxt(
     comments="",
 )
 
-(output_dir / "run_metadata.txt").write_text(
+(output_directory / "run_metadata.txt").write_text(
     "\n".join(
         [
             "case=2D_fixed_stress_H2_cyclic_injection_production",
@@ -837,7 +880,7 @@ for ax, (values, title, cbar_label, cmap, levels, symmetric_range, vector_values
     cbar.set_label(cbar_label)
 
 fig.suptitle("2D hydrogen injection with fixed-stress coupling and Newton pressure solve")
-fig.savefig(output_dir / "final_fields.png", dpi=200)
+fig.savefig(output_directory / "final_fields.png", dpi=200)
 plt.close(fig)
 
 if field_snapshots:
@@ -908,7 +951,7 @@ if field_snapshots:
         cbar.set_label(colorbar_label)
 
     fig.suptitle("Field evolution with common color scale per variable")
-    fig.savefig(output_dir / "field_evolution.png", dpi=200)
+    fig.savefig(output_directory / "field_evolution.png", dpi=200)
     plt.close(fig)
 
 if profile_snapshots:
@@ -927,7 +970,7 @@ if profile_snapshots:
         ax.grid(True, alpha=0.25)
         ax.legend(ncols=2, fontsize=8)
     fig.suptitle("Mid-height transient profiles")
-    fig.savefig(output_dir / "midheight_profiles.png", dpi=200)
+    fig.savefig(output_directory / "midheight_profiles.png", dpi=200)
     plt.close(fig)
 
 if projected_profile_snapshots:
@@ -946,7 +989,37 @@ if projected_profile_snapshots:
         ax.grid(True, alpha=0.25)
         ax.legend(ncols=2, fontsize=8)
     fig.suptitle("Mid-height transient profiles (CG1 visualization projection)")
-    fig.savefig(output_dir / "midheight_profiles_projected.png", dpi=200)
+    fig.savefig(output_directory / "midheight_profiles_projected.png", dpi=200)
     plt.close(fig)
 
-print(f"Wrote VTK, CSV diagnostics, and PNG plots to {output_dir}")
+
+# ================================
+# plot do acumulo de produção
+
+print(time_history[-5:])
+print(production_history[-5:])
+print(accumulated_history[-5:])
+
+plt.figure(figsize=(8,5))
+
+plt.plot(
+    time_history,
+    accumulated_history,
+    linewidth=2,
+    label="Production"
+)
+
+plt.xlabel("Time (days)")
+plt.ylabel("Accumulated production")
+plt.title("Accumulated hydrogen production")
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+
+plt.savefig(output_directory / "production_accumulated.png", dpi=300)
+
+plt.close()
+
+# ====================================
+print(f"Wrote VTK, CSV diagnostics, and PNG plots to {output_directory }")
