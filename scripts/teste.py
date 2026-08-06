@@ -4,7 +4,6 @@ import warnings
 from pathlib import Path
 
 import sys
-from pathlib import Path
 
 
 repo_root = Path(__file__).resolve().parents[1]
@@ -282,21 +281,20 @@ beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 # -----------------------------------------------------------------------------
 # Injection schedule
 # -----------------------------------------------------------------------------
-def operation_mode(time_days):
+def injection_schedule(time_days):
 
     cycle_length = 90.0      # days (30 days injection + 60 days shut-in)
+    injection_time = 30.0    # days
 
     cycle_time = time_days % cycle_length
 
-    if cycle_time < 30.0:  
-        return "injection"          # injection ON and production OFF
-    elif cycle_time <60.0:
-        return "stop"               # injection and production OFF
+    if cycle_time < injection_time:  
+        return True          # injection ON
     else:
-        return "production"         # injection OFF and production ON
+        return False         # injection OFF
 
-for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de testar !!!
-    print(day, operation_mode(day))
+for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
+    print(day, injection_schedule(day))
 
 
 
@@ -308,23 +306,20 @@ for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de tes
 # -----------------------------------------------------------------------------
 def hydraulic_bcs(time_days):
     bcs = []
-    mode = operation_mode(time_days)
 
     # Injection at x=0, cyclic operation
-    if mode == "injection":  # injection ON and production OFF
+    if injection_schedule(time_days):
         bcs.append(
             DirichletBC(V, p_injection, 1)  # injection ON
         )
-    elif mode == "stop":  # injection and production OFF
-        pass 
-    elif mode == "production":  # injection OFF and production ON
+    else:    # No-flow at x=0 when injection is OFF but production is ON
+        # protuction at x=Lx, always
         bcs.append(
-            DirichletBC(V, p_production, 2)  # production ON
+            DirichletBC(V, p_production, 2)
         )
-
     print(
     "day=", time_days,
-    "mode=", operation_mode(time_days),
+    "injection=", injection_schedule(time_days),
     "number BCs=", len(bcs)
     )
     return bcs
@@ -333,7 +328,6 @@ mechanics_bcs = [
     DirichletBC(W.sub(1), 0.0, 3),
     DirichletBC(W.sub(0), 0.0, 2),
 ]
-
 
 # -----------------------------------------------------------------------------
 # Mechanics problem and initial geostatic reference state.
@@ -428,8 +422,7 @@ F_pressure = (
 # -----------------------------------------------------------------------------
 # Outputs
 # -----------------------------------------------------------------------------
-repo_root = Path(__file__).resolve().parents[1]
-repo_root = Path(__file__).resolve().parents[1]
+# repo_root = Path(__file__).resolve().parents[1]
 
 if enable_geomechanics:
     case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
