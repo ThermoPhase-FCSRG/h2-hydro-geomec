@@ -4,6 +4,7 @@ import warnings
 from pathlib import Path
 
 import sys
+from pathlib import Path
 
 
 repo_root = Path(__file__).resolve().parents[1]
@@ -38,6 +39,7 @@ from firedrake import (
     project,
     solve,
     sym,   # symmetric gradient for linear elasticity
+    FacetNormal,
 )
 from firedrake.output import VTKFile
 
@@ -84,8 +86,6 @@ bar = 1.0e5     # 1 bar in Pa
 
 T = 350.0       # temperature in K. aproximadamente 77°C
 
-
-
 # I use 5% immobile water and 90% mobile gas. A water saturation of 0.95 would
 # leave only 5% gas and the Corey gas relative permeability would be nearly zero.
 gas_saturation = 0.90   # 90% preenchido por gas
@@ -93,7 +93,7 @@ water_residual = 0.05
 gas_residual = 0.05
 
 # Marcellus-like poromechanical parameters from the thesis cases.
-enable_geomechanics = True
+enable_geomechanics = False
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
 grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
@@ -128,6 +128,8 @@ p_reservoir = p0
 
 p_injection = 700e5  # 700 bar
 p_production = 100e5
+pw_left = Constant(p_reservoir)
+pw_right = Constant(p_reservoir)
 
 top_traction = as_vector((0.0, -p0))
 
@@ -150,6 +152,8 @@ def mu(p, T):
     Viscosidade do hidrogênio.
     """
     return calculate_viscosity(p,T)
+
+print("Viscosidade no reservatório =", mu(p_reservoir, T))
 
 def epsilon(u):
     return sym(grad(u))
@@ -280,23 +284,93 @@ beta_r.interpolate(inv_n + alpha_biot**2 / bulk_modulus)
 
 # -----------------------------------------------------------------------------
 # Injection schedule
+#
+# Injection well:
+#   - 30 days ON  (700 bar)  (no production)
+#   - 60 days OFF (no injection)
+#   - repeat for the whole simulation
 # -----------------------------------------------------------------------------
-def injection_schedule(time_days):
+def operation_mode(time_days):
 
     cycle_length = 90.0      # days (30 days injection + 60 days shut-in)
-    injection_time = 30.0    # days
 
     cycle_time = time_days % cycle_length
 
-    if cycle_time < injection_time:  
-        return True          # injection ON
+    if cycle_time < 30.0:  
+        return "injection"          # injection ON and production OFF
+    elif cycle_time <60.0:
+        return "stop"               # injection and production OFF
     else:
-        return False         # injection OFF
+        return "production"         # injection OFF and production ON
 
-for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
-    print(day, injection_schedule(day))
+for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de testar !!!
+    print(day, operation_mode(day))
+
+# -------------------------------------
+gamma_open  = Constant(1.0e-12)   # depois rever (!!!) e mudar para well index
+gamma_closed = Constant(0.0)
+gamma_left  = Constant(0.0)   # depois rever (!!!) e mudar para well index
+gamma_right = Constant(0.0)
+# -------------------------------------
+def update_well_pressures(time_days):
+    mode = operation_mode(time_days)
+
+    if mode == "injection":
+
+        pw_left.assign(p_injection)
+        gamma_left.assign(gamma_open)
+
+        pw_right.assign(p_reservoir)
+        gamma_right.assign(gamma_closed)
 
 
+    elif mode == "stop":
+
+        pw_left.assign(p_reservoir)
+        gamma_left.assign(gamma_closed)
+
+        pw_right.assign(p_reservoir)
+        gamma_right.assign(gamma_closed)
+
+    elif mode == "production":
+
+        pw_left.assign(p_reservoir)
+        gamma_left.assign(gamma_closed)
+
+        pw_right.assign(p_production)
+        gamma_right.assign(gamma_open)
+
+
+# -----------------------------------------------------------------
+# Well index 
+# -----------------------------------------------------------------
+"""
+rw_left = 0.10
+rw_right = 0.10
+
+skin_left = 0.0
+skin_right = 0.0
+
+re_left = 0.2
+re_right = 0.2
+
+WI_left = (
+    2*np.pi
+    * initial_permeability_value
+    * Ly
+    / (np.log(re_left/rw_left) + skin_left)
+)
+
+WI_right = (
+    2*np.pi
+    * initial_permeability_value
+    * Ly
+    /(np.log(re_right/rw_right) + skin_right)
+)
+
+print(f"WI inicial = {WI_left:.6e} m³")
+print(f"WI inicial = {WI_right:.6e} m³")
+"""
 
 # -----------------------------------------------------------------------------
 # Boundary conditions
@@ -305,24 +379,26 @@ for day in [0, 10, 30, 60, 90, 100, 150, 365]:   # remover depois de testar !!!
 #   1: x = 0, 2: x = Lx, 3: y = 0, 4: y = Ly.
 # -----------------------------------------------------------------------------
 def hydraulic_bcs(time_days):
+    """
     bcs = []
+    mode = operation_mode(time_days)
 
     # Injection at x=0, cyclic operation
-    if injection_schedule(time_days):
+    if mode == "injection":  # injection ON and production OFF
         bcs.append(
             DirichletBC(V, p_injection, 1)  # injection ON
         )
-    else:    # No-flow at x=0 when injection is OFF but production is ON
-        # protuction at x=Lx, always
+    elif mode == "stop":  # injection and production OFF
+        pass 
+    elif mode == "production":  # injection OFF and production ON
         bcs.append(
-            DirichletBC(V, p_production, 2)
+            DirichletBC(V, p_production, 2)  # production ON
         )
-    print(
-    "day=", time_days,
-    "injection=", injection_schedule(time_days),
-    "number BCs=", len(bcs)
-    )
-    return bcs
+
+    print("mode=", operation_mode(time_days))
+    return bcs 
+    """
+    return []
 
 mechanics_bcs = [
     DirichletBC(W.sub(1), 0.0, 3),
@@ -416,20 +492,38 @@ F_pressure = (
     + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
 )
 
+F_pressure += (
+    dt
+    * gamma_left / calculate_viscosity(p, T)
+    * pz
+    * (p - pw_left)
+    * v
+    * ds(1)
+)
+
+F_pressure += (
+    dt
+    * gamma_right / calculate_viscosity(p, T)
+    * pz
+    * (p - pw_right)
+    * v
+    * ds(2)
+) 
+
 # -----------------------------------------------------------------------------
 
 
 # -----------------------------------------------------------------------------
 # Outputs
 # -----------------------------------------------------------------------------
-# repo_root = Path(__file__).resolve().parents[1]
+repo_root = Path(__file__).resolve().parents[1]
 
 if enable_geomechanics:
     case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
 else:
     case_name = "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
 
-output_dir = repo_root / "outputs" / "2D" / case_name
+output_dir = repo_root / "outputs" / "TESTE" / case_name
 output_dir.mkdir(parents=True, exist_ok=True)
 for output_file in (
     "fields.pvd",
@@ -460,8 +554,6 @@ profile_days = {5.0, 30.0, 60.0, 90.0, 180.0, 365.0}             # rever !!!
 field_snapshots = []
 history_rows = []
 
-
-
 # -----------------------------------------------------------------------------
 # Production history
 # -----------------------------------------------------------------------------
@@ -469,6 +561,7 @@ time_history = []
 production_history = []
 accumulated_history = []
 
+production_accumulated = 0.0                           
 
 # -----------------------------------------------------------------------------
 # Time loop
@@ -476,25 +569,20 @@ accumulated_history = []
 total_steps = int(round(t_total / dt_seconds))
 t = dt_seconds
 step = 0
-n = FacetNormal(mesh) 
-flux_vector= (
-    -(permeability_newton / calculate_viscosity(p, T))
-    * (p / Z(p, T))
-    * grad(p)
-)
-production_rate_history = []
-production_accumulated_history = []
-production_accumulated = 0.0
 while step < total_steps:
     step += 1
     time_days = t / SECONDS_PER_DAY
 
-    hydraulic_bcs_current = hydraulic_bcs(time_days)
+    mode = operation_mode(time_days)
+
+    update_well_pressures(time_days)
+
+    # hydraulic_bcs_current = hydraulic_bcs(time_days)
 
     pressure_problem = NonlinearVariationalProblem(
         F_pressure,
         p,
-        bcs=hydraulic_bcs_current,
+        # bcs=hydraulic_bcs_current,
         J=derivative(F_pressure, p),
     )
 
@@ -511,10 +599,47 @@ while step < total_steps:
     converged = False
     last_newton_iterations = 0
     for iteration in range(1, max_fixed_stress_iterations + 1):
-        p.assign(p_iter)
+        print(
+            f"\nSTEP {step} | DAY {time_days:.1f} | "
+            f"FIXED-STRESS ITER {iteration}"
+        )
+
+        print(
+            "p antes:",
+            f"[{p.dat.data_ro.min():.6e}, "
+            f"{p.dat.data_ro.max():.6e}]"
+        )
+
+        print(
+            "phi:",
+            f"[{phi_iter.dat.data_ro.min():.6e}, "
+            f"{phi_iter.dat.data_ro.max():.6e}]"
+        )
+
+        print(
+            "sigma:",
+            f"[{sigma_iter.dat.data_ro.min():.6e}, "
+            f"{sigma_iter.dat.data_ro.max():.6e}]"
+        )
+
+        print(
+            "stress_increment:",
+            f"[{(sigma_iter.dat.data_ro - sigma_n.dat.data_ro).min():.6e}, "
+            f"{(sigma_iter.dat.data_ro - sigma_n.dat.data_ro).max():.6e}]"
+        )
+
+        print("type permeability_newton =", type(permeability_newton))
         pressure_solver.solve()
+
+        print(
+            "p depois:",
+            f"[{p.dat.data_ro.min():.6e}, "
+            f"{p.dat.data_ro.max():.6e}]"
+        )
+        
         last_newton_iterations = int(pressure_solver.snes.getIterationNumber())
         pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p_iter, mesh=mesh), 1.0)
+
 
         l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
         solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
@@ -545,35 +670,85 @@ while step < total_steps:
             f"{max_fixed_stress_iterations} iterations."
         )
 
+    # ----------------------
+    # calculo da vazão de Darcy nos dois lados
+    flux_vector = (  # fluxo no domínio
+        -(permeability_newton / calculate_viscosity(p, T))
+        * (p / Z(p, T))
+        * grad(p)
+    )
+    n = FacetNormal(mesh)  # vetor normal à fronteira
+    q_left = assemble(dot(flux_vector, n) * ds(1)) # Calcula o fluxo através da fronteira esquerda.
+    q_right = assemble(dot(flux_vector, n) * ds(2)) # Calcula o fluxo através da fronteira direita.
+    # --------------------------
+
+    q_robin_right = assemble(
+        gamma_right
+        / calculate_viscosity(p, T)
+        * pz
+        * (p - pw_right)
+        * ds(2)
+        )
+
+    q_darcy_right = assemble(
+        -permeability_newton
+        / calculate_viscosity(p, T)
+        * pz
+        * dot(grad(p), FacetNormal(mesh))
+        * ds(2)
+    )
+    # -------------------------
+    print(f"day={time_days:.1f}")
+    print(f"mode={operation_mode(time_days)}")
+    print(f"q_left ={q_left:.6e}")
+    print(f"q_right={q_right:.6e}")
+    print(f"q Robin = {q_robin_right:.6e}")
+    print(f"q Darcy = {q_darcy_right:.6e}")
+    # -------------------------
+    # Termo associado à variação de tensão
     dsigma_total_dt.interpolate((sigma_t - sigma_n) / dt)
     source_rate.interpolate(
         -gas_saturation_constant * (p / Z(p, T)) * (alpha_biot / bulk_modulus) * dsigma_total_dt
     )
+    # ---------------------------------------------------------
+    # Pressão no produtor
+    print("Pressure at producer:", point_value(p, Lx, Ly / 2))
+    print("Producer pressure:", float(pw_right))
+    print("Pressure difference:", point_value(p, Lx, Ly / 2) - float(pw_right))
 
-    flux_expression = dot(flux_vector, n)
-    production_rate = assemble( # esse número representa a produção instantanea 
-        flux_expression * ds(2)      # assemble calcula a integral e ds(2) representa a fronteira do produtor
-    )
-    production_accumulated += production_rate * dt_seconds
 
-    # production_rate_history.append(production_rate) # rever/remover depois
-    # production_accumulated_history.append(production_accumulated) # rever/remover depois
-    
+    # ---------------------------------------------------------
+    # Produção
+    # ---------------------------------------------------------
+
+    if mode == "production":
+        q_production = float(q_darcy_right)
+    else:
+        q_production = 0.0
+    # ---------------------------------------------------------
+    # Produção acumulada
+    production_accumulated += q_production * dt_seconds
+    # ---------------------------------------------------------
+    # Histórico
+    # ---------------------------------------------------------
     time_history.append(time_days)
-    production_history.append(production_rate)
+    production_history.append(q_production)
     accumulated_history.append(production_accumulated)
 
     print(
-    f"Day {time_days:5.1f} "
-    f"Production = {production_rate:.6e} "
-    f"Accumulated = {production_accumulated:.6e}"
+        f"Day {time_days:5.1f} "
+        f"Production = {q_production:.6e} "
+        f"Accumulated = {production_accumulated:.6e}"
     )
-    
 
+    # ---------------------------------------------------------
+    # Atualiza estado anterior
     p_n.assign(p)
     u_n.assign(u)
     phi_n.assign(phi)
     sigma_n.assign(sigma_t)
+
+
 
     if step % 5 == 0 or step == total_steps:
         outfile.write(p, phi, sigma_t, source_rate, u, u_increment, time=t)
@@ -877,38 +1052,33 @@ if projected_profile_snapshots:
         ax.grid(True, alpha=0.25)
         ax.legend(ncols=2, fontsize=8)
     fig.suptitle("Mid-height transient profiles (CG1 visualization projection)")
-    fig.savefig(output_dir / "midheight_profiles_projected.png", dpi=200)
+    fig.savefig(output_dir  / "midheight_profiles_projected.png", dpi=200)
     plt.close(fig)
 
-# -----------------------------------------------------------------------------
-# Accumulated production plot
-
+# ================================
+# plot do acumulo de produção
 print(time_history[-5:])
 print(production_history[-5:])
 print(accumulated_history[-5:])
 
-
 plt.figure(figsize=(8,5))
-
 plt.plot(
     time_history,
     accumulated_history,
     linewidth=2,
     label="Production"
 )
-
 plt.xlabel("Time (days)")
 plt.ylabel("Accumulated production")
 plt.title("Accumulated hydrogen production")
 plt.grid(True)
 plt.legend()
-
 plt.tight_layout()
-
-plt.savefig(output_dir / "accumulated_production.png", dpi=300)
-
+plt.savefig(output_dir / "production_accumulated.png", dpi=300)
 plt.close()
+
 # -----------------------------------------------------------------------------
+# Salva histórico da produção
 np.savetxt(
     output_dir / "production_history.csv",
     np.column_stack((
@@ -917,13 +1087,14 @@ np.savetxt(
         accumulated_history,
     )),
     delimiter=",",
-    header="time_days,production_rate,production_accumulated",
+    header="time_days,q_production,production_accumulated",
     comments="",
-)# -----------------------------------------------------------------------------
+)
+# -----------------------------------------------------------------------------
 # plot comparation of hidrodinamic vs geomechanical cases
 
 geo = np.loadtxt(
-    repo_root / "outputs" / "2D"
+    repo_root / "outputs" / "TESTE"
     / "compressible_hm_2D_fixed_stress_H2_cyclic_geomechanics"
     / "production_history.csv",
     delimiter=",",
@@ -931,15 +1102,15 @@ geo = np.loadtxt(
 )
 
 hydro = np.loadtxt(
-    repo_root / "outputs" / "2D"
+    repo_root / "outputs" / "TESTE"
     / "compressible_hm_2D_fixed_stress_H2_cyclic_hydrodynamic"
     / "production_history.csv",
     delimiter=",",
     skiprows=1,
-)# ---plt.figure(figsize=(7,4))
+)
+plt.figure(figsize=(7,4))
 plt.plot(geo[:,0], geo[:,2], label="With geomechanics")
 plt.plot(hydro[:,0], hydro[:,2], label="Without geomechanics")
-
 plt.xlabel("Time (days)")
 plt.ylabel("Accumulated production")
 plt.grid(True)
