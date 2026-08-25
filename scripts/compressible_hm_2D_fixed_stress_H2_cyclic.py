@@ -93,14 +93,20 @@ water_residual = 0.05
 gas_residual = 0.05
 
 # Marcellus-like poromechanical parameters from the thesis cases.
-enable_geomechanics = False
+enable_geomechanics = False 
+if enable_geomechanics:
+    coupling = Constant(1.0)
+else:
+    coupling = Constant(0.0)
 young_modulus = 6.0e9       # Young's modulus in Pa; mede a rigidez da rocha
 poisson_ratio = 0.23        # relaciona a deformação lateral à deformação axial
 grain_bulk_modulus = Constant(40.0e9) # ks? # módulo volumétrico dos grãos em Pa; mede a compressibilidade dos grãos individuais
+alpha_biot_value = 0.91
+"""
 if enable_geomechanics:
     alpha_biot_value = 0.91
 else:
-    alpha_biot_value = 0.0
+    alpha_biot_value = 0.0  """
 
 initial_porosity_value = 0.08
 initial_permeability_value = 6.0e-19
@@ -311,7 +317,7 @@ for day in [0, 10, 30, 40, 60, 70, 90, 100, 150, 365]:   # remover depois de tes
     print(day, operation_mode(day))
 # -------------------------------------
 gamma_open  = Constant(1.0e-12)   # depois rever (!!!) e mudar para well index
-gamma_closed = Constant(0.0)
+
 gamma_left  = Constant(0.0)   # depois rever (!!!) e mudar para well index
 gamma_right = Constant(0.0)
 # -------------------------------------
@@ -324,21 +330,21 @@ def update_well_pressures(time_days):
         gamma_left.assign(gamma_open)
 
         pw_right.assign(p_reservoir)
-        gamma_right.assign(gamma_closed)
+        gamma_right.assign(0.0)
 
 
     elif mode == "stop":
 
         pw_left.assign(p_reservoir)
-        gamma_left.assign(gamma_closed)
+        gamma_left.assign(0.0)
 
         pw_right.assign(p_reservoir)
-        gamma_right.assign(gamma_closed)
+        gamma_right.assign(0.0)
 
     elif mode == "production":
 
         pw_left.assign(p_reservoir)
-        gamma_left.assign(gamma_closed)
+        gamma_left.assign(0.0)
 
         pw_right.assign(p_production)
         gamma_right.assign(gamma_open)
@@ -413,33 +419,37 @@ mechanics_bcs = [
 # equilibrium induced by that pressure and the top traction -p0 n; subsequent
 # porosity/source terms use this state as the geostatic reference.
 # -----------------------------------------------------------------------------
-a_elasticity = (
+if enable_geomechanics:
+    a_elasticity = (
     2.0 * shear_modulus * inner(epsilon(du), epsilon(w)) * dx
     + lame_lambda * div(du) * div(w) * dx
-)
-l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
+    )
 
-mechanics_solver_parameters = {
-    "ksp_type": "preonly",
-    "pc_type": "lu",
-}
-solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
+    l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
 
-print("pressure injector:",
-      point_value(p, 0.0, Ly/2)/1e6)
+    mechanics_solver_parameters = {
+        "ksp_type": "preonly",
+        "pc_type": "lu",
+    }
+
+    solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
+
+    u_reference.assign(u)
+    u_n.assign(u)
+    u_iter.assign(u)
+    u_increment.interpolate(u - u_reference)
+    div_u_reference.interpolate(div(u_reference))
+    sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
+    sigma_n.assign(sigma_t)
+    sigma_iter.assign(sigma_t)
+else:
+    phi.assign(phi0)
+    u.assign(u_reference)
+    sigma_t.assign(sigma_n)
+
 
 print("pressure inside:",
       point_value(p, 1.0, Ly/2)/1e6)
-
-
-u_reference.assign(u)
-u_n.assign(u)
-u_iter.assign(u)
-u_increment.interpolate(u - u_reference)
-div_u_reference.interpolate(div(u_reference))
-sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
-sigma_n.assign(sigma_t)
-sigma_iter.assign(sigma_t)
 
 
 # -----------------------------------------------------------------------------
@@ -462,7 +472,7 @@ def effective_permeability(phi_current):
         k_rel
         * initial_permeability
         * ((3.0 - phi0) / (2.0 * phi0))
-        * (2.0 * phi_current / (3.0 - phi_current))
+        * (2.0 * phi_current / (3.0 - phi_current))    # se phi_current=phi0 então k= k_krel*k0
     )
 
 
@@ -486,12 +496,23 @@ permeability_newton = effective_permeability(phi_iter)
 stress_increment_newton = sigma_iter - sigma_n
 pz = p / Z(p, T)
 pz_n = p_n / Z(p_n, T)
+
+print("\n--- TESTE ACOPLAMENTO ---")
+print("enable_geomechanics =", enable_geomechanics)
+print("alpha_biot =", float(alpha_biot))
+print(
+    "beta_r min/max =",
+    beta_r.dat.data_ro.min(),
+    beta_r.dat.data_ro.max()
+)
+print("--------------------------\n")
 F_pressure = (
     gas_saturation_constant * phi_iter * (pz - pz_n) * v * dx
-    + gas_saturation_constant * beta_r * pz * (p - p_n) * v * dx
+    + coupling * gas_saturation_constant * beta_r * pz * (p - p_n) * v * dx
     + dt * (permeability_newton / calculate_viscosity(p, T)) * pz * inner(grad(p), grad(v)) * dx
-    + gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx
+    + coupling * (gas_saturation_constant * pz * (alpha_biot / bulk_modulus) * stress_increment_newton * v * dx)
 )
+
 
 F_pressure += (
     dt
@@ -597,63 +618,30 @@ while step < total_steps:
 
     converged = False
     last_newton_iterations = 0
+    displacement_change = 0.0
+    phi_change = 0.0
+    sigma_change = 0.0
+
     for iteration in range(1, max_fixed_stress_iterations + 1):
-        print(
-            f"\nSTEP {step} | DAY {time_days:.1f} | "
-            f"FIXED-STRESS ITER {iteration}"
-        )
-
-        print(
-            "p antes:",
-            f"[{p.dat.data_ro.min():.6e}, "
-            f"{p.dat.data_ro.max():.6e}]"
-        )
-
-        print(
-            "phi:",
-            f"[{phi_iter.dat.data_ro.min():.6e}, "
-            f"{phi_iter.dat.data_ro.max():.6e}]"
-        )
-
-        print(
-            "sigma:",
-            f"[{sigma_iter.dat.data_ro.min():.6e}, "
-            f"{sigma_iter.dat.data_ro.max():.6e}]"
-        )
-
-        print(
-            "stress_increment:",
-            f"[{(sigma_iter.dat.data_ro - sigma_n.dat.data_ro).min():.6e}, "
-            f"{(sigma_iter.dat.data_ro - sigma_n.dat.data_ro).max():.6e}]"
-        )
-
-        print("type permeability_newton =", type(permeability_newton))
         pressure_solver.solve()
-
-        print(
-            "p depois:",
-            f"[{p.dat.data_ro.min():.6e}, "
-            f"{p.dat.data_ro.max():.6e}]"
-        )
                 
-
         last_newton_iterations = int(pressure_solver.snes.getIterationNumber())
         pressure_change = norm(p - p_iter, mesh=mesh) / max(norm(p_iter, mesh=mesh), 1.0)
 
+        if enable_geomechanics:
+            l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
+            solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
+            u_increment.interpolate(u - u_reference)
+            displacement_change = norm(u - u_iter, mesh=mesh) / max(norm(u_iter, mesh=mesh), 1.0)
 
-        l_elasticity = dot(w, top_traction) * ds(4) + alpha_biot * p * div(w) * dx
-        solve(a_elasticity == l_elasticity, u, bcs=mechanics_bcs, solver_parameters=mechanics_solver_parameters)
-        u_increment.interpolate(u - u_reference)
-        displacement_change = norm(u - u_iter, mesh=mesh) / max(norm(u_iter, mesh=mesh), 1.0)
+            # Porosity evolves from the mechanically equilibrated reservoir state.
+            # sigma_T itself is kept absolute, so sigma_T - sigma_T_previous is the
+            # stress increment used by the fixed-stress source term.
+            phi.interpolate(phi0 + alpha_biot * (div(u) - div_u_reference) + inv_n * (p - p_reservoir))
+            sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
 
-        # Porosity evolves from the mechanically equilibrated reservoir state.
-        # sigma_T itself is kept absolute, so sigma_T - sigma_T_previous is the
-        # stress increment used by the fixed-stress source term.
-        phi.interpolate(phi0 + alpha_biot * (div(u) - div_u_reference) + inv_n * (p - p_reservoir))         #rever !!!
-        sigma_t.interpolate(bulk_modulus * div(u) - alpha_biot * p)
-
-        phi_change = norm(phi - phi_iter, mesh=mesh) / max(norm(phi_iter, mesh=mesh), 1.0)
-        sigma_change = norm(sigma_t - sigma_iter, mesh=mesh) / max(norm(sigma_iter, mesh=mesh), 1.0)
+            phi_change = norm(phi - phi_iter, mesh=mesh) / max(norm(phi_iter, mesh=mesh), 1.0)
+            sigma_change = norm(sigma_t - sigma_iter, mesh=mesh) / max(norm(sigma_iter, mesh=mesh), 1.0)
 
         p_iter.assign(p)
         u_iter.assign(u)
@@ -677,8 +665,8 @@ while step < total_steps:
         * grad(p)
     )
     n = FacetNormal(mesh)  # vetor normal à fronteira
-    q_left = assemble(dot(flux_vector, n) * ds(1)) # Calcula o fluxo através da fronteira esquerda.
-    q_right = assemble(dot(flux_vector, n) * ds(2)) # Calcula o fluxo através da fronteira direita.
+    q_darcy_left = assemble(dot(flux_vector, n) * ds(1)) # Calcula o fluxo através da fronteira esquerda.
+    q_darcy_right = assemble(dot(flux_vector, n) * ds(2)) # Calcula o fluxo através da fronteira direita.
     # --------------------------
 
     q_robin_right = assemble(
@@ -689,18 +677,10 @@ while step < total_steps:
         * ds(2)
         )
 
-    q_darcy_right = assemble(
-        -permeability_newton
-        / calculate_viscosity(p, T)
-        * pz
-        * dot(grad(p), FacetNormal(mesh))
-        * ds(2)
-    )
     # -------------------------
-    print(f"day={time_days:.1f}")
     print(f"mode={operation_mode(time_days)}")
-    print(f"q_left ={q_left:.6e}")
-    print(f"q_right={q_right:.6e}")
+    print(f"q_darcy_left ={q_darcy_left:.6e}")
+    print(f"q_darcy_right={q_darcy_right:.6e}")
     print(f"q Robin = {q_robin_right:.6e}")
     print(f"q Darcy = {q_darcy_right:.6e}")
     # -------------------------
@@ -712,9 +692,11 @@ while step < total_steps:
 
     # ---------------------------------------------------------
     # Pressão no produtor
+    """
     print("Pressure at producer:", point_value(p, Lx, Ly / 2))
     print("Producer pressure:", float(pw_right))
     print("Pressure difference:", point_value(p, Lx, Ly / 2) - float(pw_right))
+    """
     # ---------------------------------------------------------
     # Produção
     # ---------------------------------------------------------
@@ -733,8 +715,8 @@ while step < total_steps:
     production_history.append(q_production)
     accumulated_history.append(production_accumulated)
 
+
     print(
-        f"Day {time_days:5.1f} "
         f"Production = {q_production:.6e} "
         f"Accumulated = {production_accumulated:.6e}"
     )
@@ -950,6 +932,14 @@ if field_snapshots:
     fig, axes = plt.subplots(4, ncols, figsize=(3.4 * ncols, 8.8), constrained_layout=True, squeeze=False)
 
     sigma_values = np.concatenate([snapshot["sigma_T"].ravel() for snapshot in field_snapshots])
+    sigma_min = float(sigma_values.min())
+    sigma_max = float(sigma_values.max())
+
+    if sigma_max > sigma_min:
+        sigma_levels = np.linspace(sigma_min, sigma_max, 51)
+    else:
+        sigma_levels = None
+    
     source_values = np.concatenate([snapshot["source"].ravel() for snapshot in field_snapshots])
     displacement_values = np.concatenate(
         [np.hypot(snapshot["displacement"][:, :, 0], snapshot["displacement"][:, :, 1]).ravel() for snapshot in field_snapshots]
@@ -968,7 +958,8 @@ if field_snapshots:
             "sigma_T",
             "sigma_T [MPa]",
             "magma",
-            np.linspace(float(sigma_values.min()), float(sigma_values.max()), 51),
+            # np.linspace(float(sigma_values.min()), float(sigma_values.max()), 51),
+            sigma_levels,
         ),
         (
             "source",
