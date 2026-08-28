@@ -93,7 +93,7 @@ water_residual = 0.05
 gas_residual = 0.05
 
 # Marcellus-like poromechanical parameters from the thesis cases.
-enable_geomechanics = False 
+enable_geomechanics = True # False 
 if enable_geomechanics:
     coupling = Constant(1.0)
 else:
@@ -516,7 +516,7 @@ F_pressure = (
 
 F_pressure += (
     dt
-    * gamma_left / calculate_viscosity(p, T)
+    * gamma_left
     * pz
     * (p - pw_left)
     * v
@@ -525,7 +525,7 @@ F_pressure += (
 
 F_pressure += (
     dt
-    * gamma_right / calculate_viscosity(p, T)
+    * gamma_right
     * pz
     * (p - pw_right)
     * v
@@ -661,7 +661,7 @@ while step < total_steps:
     # calculo da vazão de Darcy nos dois lados
     flux_vector = (  # fluxo no domínio
         -(permeability_newton / calculate_viscosity(p, T))
-        * (p / Z(p, T))
+        * (p / Z(p, T))    # da formulação anterior 
         * grad(p)
     )
     n = FacetNormal(mesh)  # vetor normal à fronteira
@@ -671,7 +671,6 @@ while step < total_steps:
 
     q_robin_right = assemble(
         gamma_right
-        / calculate_viscosity(p, T)
         * pz
         * (p - pw_right)
         * ds(2)
@@ -682,7 +681,6 @@ while step < total_steps:
     print(f"q_darcy_left ={q_darcy_left:.6e}")
     print(f"q_darcy_right={q_darcy_right:.6e}")
     print(f"q Robin = {q_robin_right:.6e}")
-    print(f"q Darcy = {q_darcy_right:.6e}")
     # -------------------------
     # Termo associado à variação de tensão
     dsigma_total_dt.interpolate((sigma_t - sigma_n) / dt)
